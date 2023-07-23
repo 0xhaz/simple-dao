@@ -2,6 +2,7 @@
 pragma solidity ^0.8.17;
 
 import "@openzeppelin/contracts/access/AccessControl.sol";
+import "@openzeppelin/contracts/access/AccessControlEnumerable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/KeeperCompatibleInterface.sol";
 import "hardhat/console.sol";
@@ -15,12 +16,13 @@ error Crowdfund__NotEnoughFunds();
 error Crowdfund__EntranceFeeNeeded();
 
 contract Crowdfund is
-    ReentrancyGuard,
     AccessControl,
+    AccessControlEnumerable,
+    ReentrancyGuard,
     KeeperCompatibleInterface
 {
     bytes32 private immutable i_CONTRIBUTOR_ROLE = keccak256("CONTRIBUTOR");
-    bytes32 public immutable i_STAKEHOLDER_ROLE = keccak256("STAKEHOLDER");
+    bytes32 private immutable i_STAKEHOLDER_ROLE = keccak256("STAKEHOLDER");
     address private i_KEEPER_REGISTRY;
     uint256 private s_MIN_STAKEHOLDER_FEE = 1 ether;
     uint32 MIN_VOTE_DURATION = 1 days;
@@ -74,8 +76,8 @@ contract Crowdfund is
 
     event ProposalPaid(
         uint256 indexed id,
-        address indexed executor,
-        address indexed recipient
+        address indexed recipient,
+        uint256 indexed amount
     );
 
     event ProposalContribution(address indexed contributor, uint256 amount);
@@ -85,6 +87,7 @@ contract Crowdfund is
     mapping(uint256 => Voted[]) private s_voted;
     mapping(address => uint256) private s_contributors;
     mapping(address => uint256) private s_stakeholders;
+    mapping(uint256 => bool) private s_proposalExists;
 
     constructor(
         address _admin,
@@ -115,6 +118,8 @@ contract Crowdfund is
         newProposal.recipient = _recipient;
         newProposal.proposer = payable(msg.sender);
 
+        s_proposalExists[proposalId] = true;
+
         emit ProposalCreated(
             proposalId,
             _amount,
@@ -125,10 +130,14 @@ contract Crowdfund is
         );
     }
 
-    function voteProposal(
+    function voteOnProposal(
         uint256 _proposalId,
         bool _vote
     ) external stakeholderOnly {
+        require(
+            s_proposalExists[_proposalId],
+            "Crowdfund: proposal does not exists"
+        );
         Proposal storage proposal = s_proposals[_proposalId];
         Voted[] storage voted = s_voted[_proposalId];
         bool hasVoted = false;
@@ -154,6 +163,15 @@ contract Crowdfund is
             proposal.downvotes++;
         }
 
+        uint256 totalStakeholders = _countStakeholders();
+        uint256 quorum = (totalStakeholders * 50) / 100;
+
+        if (proposal.upvotes >= quorum) {
+            proposal.passed = true;
+        } else {
+            proposal.passed = false;
+        }
+
         emit ProposalVoted(_proposalId, msg.sender, _vote);
     }
 
@@ -172,11 +190,8 @@ contract Crowdfund is
                 _grantRole(i_STAKEHOLDER_ROLE, msg.sender);
                 _grantRole(i_CONTRIBUTOR_ROLE, msg.sender);
                 s_stakeholders[msg.sender] = totalContributions;
-                s_contributors[msg.sender] += msg.value;
-            } else {
-                s_contributors[msg.sender] += msg.value;
-                _grantRole(i_CONTRIBUTOR_ROLE, msg.sender);
             }
+            s_contributors[msg.sender] += msg.value;
         } else {
             s_contributors[msg.sender] += msg.value;
             s_stakeholders[msg.sender] += msg.value;
@@ -237,7 +252,7 @@ contract Crowdfund is
         uint256 latestProposalId = s_totalProposals - 1;
         upkeepNeeded =
             s_proposals[latestProposalId].passed &&
-            s_proposals[latestProposalId].duration <= block.timestamp &&
+            s_proposals[latestProposalId].duration >= block.timestamp &&
             s_daoBalance >= s_proposals[latestProposalId].amount &&
             !s_proposals[latestProposalId].paid;
     }
@@ -245,19 +260,19 @@ contract Crowdfund is
     function performUpkeep(bytes calldata /* performData */) external override {
         uint256 latestProposalId = s_totalProposals - 1;
         Proposal storage proposal = s_proposals[latestProposalId];
-
-        if (proposal.upvotes <= proposal.downvotes) {
-            proposal.passed = false;
-        } else {
-            proposal.passed = true;
-        }
+        uint256 totalStakeholders = _countStakeholders();
+        uint256 quorum = (totalStakeholders * 50) / 100;
 
         if (proposal.passed && !proposal.paid) {
             _payTo(proposal.recipient, proposal.amount);
             s_daoBalance -= proposal.amount;
             proposal.paid = true;
 
-            emit ProposalPaid(latestProposalId, msg.sender, proposal.recipient);
+            emit ProposalPaid(
+                latestProposalId,
+                proposal.recipient,
+                proposal.amount
+            );
         }
     }
 
@@ -369,10 +384,40 @@ contract Crowdfund is
         return s_daoPercentage;
     }
 
+    function supportsInterface(
+        bytes4 interfaceId
+    )
+        public
+        view
+        virtual
+        override(AccessControl, AccessControlEnumerable)
+        returns (bool)
+    {
+        return super.supportsInterface(interfaceId);
+    }
+
+    function _revokeRole(
+        bytes32 role,
+        address account
+    ) internal virtual override(AccessControl, AccessControlEnumerable) {
+        super._revokeRole(role, account);
+    }
+
+    function _grantRole(
+        bytes32 role,
+        address account
+    ) internal virtual override(AccessControl, AccessControlEnumerable) {
+        super._grantRole(role, account);
+    }
+
     function _payTo(address payable _to, uint256 _amount) internal {
         uint256 fee = (_amount * s_daoPercentage) / 100;
         uint256 amount = _amount - fee;
         (bool success, ) = _to.call{value: amount}("");
         require(success, "Crowdfund: transfer failed");
+    }
+
+    function _countStakeholders() internal view returns (uint256) {
+        return getRoleMemberCount(i_STAKEHOLDER_ROLE);
     }
 }

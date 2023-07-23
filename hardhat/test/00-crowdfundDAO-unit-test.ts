@@ -44,29 +44,6 @@ describe("Crowdfund", () => {
   });
 
   describe("Deployment", () => {
-    it("should allow deployer to create a proposal", async () => {
-      await crowdfund.grantRoleToUser(
-        crowdfund.i_STAKEHOLDER_ROLE(),
-        deployer.address
-      );
-
-      const proposalTitle = "Proposal #1: Store 77 in the Box!";
-      const proposalDescription = "Proposal #1: Store 77 in the Box!";
-      const recipientAddress = projectOwner.address;
-      const proposalAmount = ether(1);
-
-      await expect(
-        crowdfund
-          .connect(deployer)
-          .createProposal(
-            proposalTitle,
-            proposalDescription,
-            recipientAddress,
-            proposalAmount
-          )
-      ).not.to.be.reverted;
-    });
-
     it("should deploy the contracts correctly", async () => {
       assert.exists(crowdfund.address);
       expect(await crowdfund.getDaoPercentage()).to.equal(PERCENTAGE_FEE);
@@ -140,6 +117,223 @@ describe("Crowdfund", () => {
           crowdfund.connect(voter2).contributeCampaign({ value: ether(0.5) })
         ).to.be.revertedWithCustomError(crowdfund, "Crowdfund__NotEnoughFunds");
       });
+    });
+  });
+
+  describe("Create a Proposal", () => {
+    let transaction: any, result;
+    beforeEach(async () => {
+      transaction = await crowdfund
+        .connect(projectOwner)
+        .contributeCampaign({ value: ether(1) });
+      result = await transaction.wait();
+    });
+
+    describe("Success", () => {
+      it("should allow a stakeholder to create a proposal", async () => {
+        const proposalTitle = "Proposal #1: Store 77 in the Box!";
+        const proposalDescription = "Proposal #1: Store 77 in the Box!";
+        const recipientAddress = projectOwner.address;
+        const proposalAmount = ether(1);
+
+        await expect(
+          crowdfund
+            .connect(projectOwner)
+            .createProposal(
+              proposalTitle,
+              proposalDescription,
+              recipientAddress,
+              proposalAmount
+            )
+        ).not.to.be.reverted;
+      });
+
+      it("should emit a ProposalCreated event", async () => {
+        const proposalTitle = "Proposal #1: Store 77 in the Box!";
+        const proposalDescription = "Proposal #1: Store 77 in the Box!";
+        const recipientAddress = projectOwner.address;
+        const proposalAmount = ether(1);
+        transaction = await crowdfund
+          .connect(projectOwner)
+          .createProposal(
+            proposalTitle,
+            proposalDescription,
+            recipientAddress,
+            proposalAmount
+          );
+        result = await transaction.wait();
+
+        await expect(transaction)
+          .to.emit(crowdfund, "ProposalCreated")
+          .withArgs(
+            0,
+            ether(1),
+            "Proposal #1: Store 77 in the Box!",
+            "Proposal #1: Store 77 in the Box!",
+            projectOwner.address,
+            projectOwner.address
+          );
+      });
+    });
+
+    describe("Failure", () => {
+      it("should not allow a non-stakeholder to create a proposal", async () => {
+        const proposalTitle = "Proposal #1: Store 77 in the Box!";
+        const proposalDescription = "Proposal #1: Store 77 in the Box!";
+        const recipientAddress = projectOwner.address;
+        const proposalAmount = ether(1);
+
+        await expect(
+          crowdfund
+            .connect(voter2)
+            .createProposal(
+              proposalTitle,
+              proposalDescription,
+              recipientAddress,
+              proposalAmount
+            )
+        ).to.be.reverted;
+      });
+    });
+  });
+
+  describe("Vote on a Proposal", () => {
+    let transaction: any, result: any, proposalId: number;
+    beforeEach(async () => {
+      transaction = await crowdfund
+        .connect(projectOwner)
+        .contributeCampaign({ value: ether(1) });
+      result = await transaction.wait();
+
+      transaction = await crowdfund.connect(voter2).contributeCampaign({
+        value: ether(1),
+      });
+      result = await transaction.wait();
+
+      const proposalTitle = "Proposal #1: Store 77 in the Box!";
+      const proposalDescription = "Proposal #1: Store 77 in the Box!";
+      const recipientAddress = projectOwner.address;
+      const proposalAmount = ether(1);
+      transaction = await crowdfund
+        .connect(projectOwner)
+        .createProposal(
+          proposalTitle,
+          proposalDescription,
+          recipientAddress,
+          proposalAmount
+        );
+      result = await transaction.wait();
+      proposalId = result.events[0].args.id.toNumber();
+    });
+
+    describe("Success", () => {
+      it("should allow a stakeholder to vote on a proposal", async () => {
+        await expect(crowdfund.connect(voter2).voteOnProposal(proposalId, true))
+          .not.to.be.reverted;
+      });
+
+      it("should emit a ProposalVoted event", async () => {
+        const proposalId = result.events[0].args.id.toNumber();
+        transaction = await crowdfund
+          .connect(voter2)
+          .voteOnProposal(proposalId, true);
+        result = await transaction.wait();
+
+        await expect(transaction)
+          .to.emit(crowdfund, "ProposalVoted")
+          .withArgs(proposalId, voter2.address, true);
+      });
+    });
+
+    describe("Failure", () => {
+      it("should not allow a non-stakeholder to vote on a proposal", async () => {
+        await expect(crowdfund.connect(voter3).voteOnProposal(0, true)).to.be
+          .reverted;
+      });
+
+      it("should not allow a stakeholder to vote on a proposal that does not exist", async () => {
+        await expect(crowdfund.connect(voter2).voteOnProposal(1, true)).to.be
+          .reverted;
+      });
+
+      it("should not allow a stakeholder to vote on a proposal that has already been voted on", async () => {
+        await crowdfund.connect(voter2).voteOnProposal(0, true);
+        await expect(
+          crowdfund.connect(voter2).voteOnProposal(0, true)
+        ).to.be.revertedWithCustomError(crowdfund, "Crowdfund__NotContributor");
+      });
+    });
+  });
+
+  describe("Release Funds from Chainlink Keeper", () => {
+    let transaction: any, result: any, proposalId: number;
+    beforeEach(async () => {
+      transaction = await crowdfund
+        .connect(projectOwner)
+        .contributeCampaign({ value: ether(1) });
+      result = await transaction.wait();
+
+      transaction = await crowdfund.connect(voter2).contributeCampaign({
+        value: ether(1),
+      });
+      result = await transaction.wait();
+
+      const proposalTitle = "Proposal #1: Store 77 in the Box!";
+      const proposalDescription = "Proposal #1: Store 77 in the Box!";
+      const recipientAddress = projectOwner.address;
+      const proposalAmount = ether(1);
+      transaction = await crowdfund
+        .connect(projectOwner)
+        .createProposal(
+          proposalTitle,
+          proposalDescription,
+          recipientAddress,
+          proposalAmount
+        );
+      result = await transaction.wait();
+      proposalId = result.events[0].args.id.toNumber();
+
+      transaction = await crowdfund
+        .connect(deployer)
+        .setKeeperRegistry(deployer.address);
+      result = await transaction.wait();
+
+      transaction = await crowdfund
+        .connect(voter2)
+        .voteOnProposal(proposalId, true);
+      result = await transaction.wait();
+
+      await network.provider.send("evm_increaseTime", [86400 * 2]); // Advance the block timestamp by 48 hours
+      await network.provider.send("evm_mine"); // Mine a new block with the updated timestamp
+
+      transaction = await crowdfund.performUpkeep([]);
+      result = await transaction.wait();
+    });
+
+    describe("Success", () => {
+      it("should allow Keeper to release funds", async () => {
+        expect(await crowdfund.getDaoBalance()).to.equal(
+          ethers.utils.parseEther("0.1")
+        );
+      });
+
+      it("should emit a ProposalFundsReleased event", async () => {
+        await expect(transaction)
+          .to.emit(crowdfund, "ProposalPaid")
+          .withArgs(
+            proposalId,
+            projectOwner.address,
+            ethers.utils.parseEther("0.9")
+          );
+      });
+    });
+
+    describe("Failure", () => {
+      it("should not allow a non-stakeholder to release funds from the chainlink keeper", async () => {});
+
+      it("should not allow a stakeholder to release funds from the chainlink keeper if the proposal does not exist", async () => {});
+
+      it("should not allow a stakeholder to release", async () => {});
     });
   });
 });
