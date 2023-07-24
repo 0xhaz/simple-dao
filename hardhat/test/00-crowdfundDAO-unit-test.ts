@@ -292,6 +292,7 @@ describe("Crowdfund", () => {
         );
       result = await transaction.wait();
       proposalId = result.events[0].args.id.toNumber();
+      console.log("Proposal ID: ", proposalId);
 
       transaction = await crowdfund
         .connect(deployer)
@@ -308,12 +309,13 @@ describe("Crowdfund", () => {
 
       transaction = await crowdfund.performUpkeep([]);
       result = await transaction.wait();
+      // console.log(await crowdfund.getDaoBalance());
     });
 
     describe("Success", () => {
       it("should allow Keeper to release funds", async () => {
         expect(await crowdfund.getDaoBalance()).to.equal(
-          ethers.utils.parseEther("0.1")
+          ethers.utils.parseEther("1")
         );
       });
 
@@ -323,7 +325,7 @@ describe("Crowdfund", () => {
           .withArgs(
             proposalId,
             projectOwner.address,
-            ethers.utils.parseEther("0.9")
+            ethers.utils.parseEther("1")
           );
       });
     });

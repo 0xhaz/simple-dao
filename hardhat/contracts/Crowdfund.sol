@@ -163,15 +163,6 @@ contract Crowdfund is
             proposal.downvotes++;
         }
 
-        uint256 totalStakeholders = _countStakeholders();
-        uint256 quorum = (totalStakeholders * 50) / 100;
-
-        if (proposal.upvotes >= quorum) {
-            proposal.passed = true;
-        } else {
-            proposal.passed = false;
-        }
-
         emit ProposalVoted(_proposalId, msg.sender, _vote);
     }
 
@@ -262,6 +253,12 @@ contract Crowdfund is
         Proposal storage proposal = s_proposals[latestProposalId];
         uint256 totalStakeholders = _countStakeholders();
         uint256 quorum = (totalStakeholders * 50) / 100;
+
+        if (proposal.upvotes >= quorum) {
+            proposal.passed = true;
+        } else {
+            proposal.passed = false;
+        }
 
         if (proposal.passed && !proposal.paid) {
             _payTo(proposal.recipient, proposal.amount);
