@@ -267,52 +267,52 @@ describe("Crowdfund", () => {
 
   describe("Release Funds from Chainlink Keeper", () => {
     let transaction: any, result: any, proposalId: number;
-    beforeEach(async () => {
-      transaction = await crowdfund
-        .connect(projectOwner)
-        .contributeCampaign({ value: ether(1) });
-      result = await transaction.wait();
-
-      transaction = await crowdfund.connect(voter2).contributeCampaign({
-        value: ether(1),
-      });
-      result = await transaction.wait();
-
-      const proposalTitle = "Proposal #1: Store 77 in the Box!";
-      const proposalDescription = "Proposal #1: Store 77 in the Box!";
-      const recipientAddress = projectOwner.address;
-      const proposalAmount = ether(1);
-      transaction = await crowdfund
-        .connect(projectOwner)
-        .createProposal(
-          proposalTitle,
-          proposalDescription,
-          recipientAddress,
-          proposalAmount
-        );
-      result = await transaction.wait();
-      proposalId = result.events[0].args.id.toNumber();
-      console.log("Proposal ID: ", proposalId);
-
-      transaction = await crowdfund
-        .connect(deployer)
-        .setKeeperRegistry(deployer.address);
-      result = await transaction.wait();
-
-      transaction = await crowdfund
-        .connect(voter2)
-        .voteOnProposal(proposalId, true);
-      result = await transaction.wait();
-
-      await network.provider.send("evm_increaseTime", [86400 * 2]); // Advance the block timestamp by 48 hours
-      await network.provider.send("evm_mine"); // Mine a new block with the updated timestamp
-
-      transaction = await crowdfund.performUpkeep([]);
-      result = await transaction.wait();
-      // console.log(await crowdfund.getDaoBalance());
-    });
 
     describe("Success", () => {
+      beforeEach(async () => {
+        transaction = await crowdfund
+          .connect(projectOwner)
+          .contributeCampaign({ value: ether(1) });
+        result = await transaction.wait();
+
+        transaction = await crowdfund.connect(voter2).contributeCampaign({
+          value: ether(1),
+        });
+        result = await transaction.wait();
+
+        const proposalTitle = "Proposal #1: Store 77 in the Box!";
+        const proposalDescription = "Proposal #1: Store 77 in the Box!";
+        const recipientAddress = projectOwner.address;
+        const proposalAmount = ether(1);
+        transaction = await crowdfund
+          .connect(projectOwner)
+          .createProposal(
+            proposalTitle,
+            proposalDescription,
+            recipientAddress,
+            proposalAmount
+          );
+        result = await transaction.wait();
+        proposalId = result.events[0].args.id.toNumber();
+
+        transaction = await crowdfund
+          .connect(deployer)
+          .setKeeperRegistry(deployer.address);
+        result = await transaction.wait();
+
+        transaction = await crowdfund
+          .connect(voter2)
+          .voteOnProposal(proposalId, true);
+        result = await transaction.wait();
+
+        await network.provider.send("evm_increaseTime", [86400 * 2]); // Advance the block timestamp by 48 hours
+        await network.provider.send("evm_mine"); // Mine a new block with the updated timestamp
+
+        transaction = await crowdfund.connect(deployer).performUpkeep([]);
+        result = await transaction.wait();
+        // console.log(await crowdfund.getDaoBalance());
+      });
+
       it("should allow Keeper to release funds", async () => {
         expect(await crowdfund.getDaoBalance()).to.equal(
           ethers.utils.parseEther("1")
@@ -331,11 +331,59 @@ describe("Crowdfund", () => {
     });
 
     describe("Failure", () => {
-      it("should not allow a non-stakeholder to release funds from the chainlink keeper", async () => {});
+      beforeEach(async () => {
+        transaction = await crowdfund
+          .connect(projectOwner)
+          .contributeCampaign({ value: ether(1) });
+        result = await transaction.wait();
 
-      it("should not allow a stakeholder to release funds from the chainlink keeper if the proposal does not exist", async () => {});
+        transaction = await crowdfund.connect(voter2).contributeCampaign({
+          value: ether(1),
+        });
+        result = await transaction.wait();
 
-      it("should not allow a stakeholder to release", async () => {});
+        const proposalTitle = "Proposal #1: Store 77 in the Box!";
+        const proposalDescription = "Proposal #1: Store 77 in the Box!";
+        const recipientAddress = projectOwner.address;
+        const proposalAmount = ether(1);
+        transaction = await crowdfund
+          .connect(projectOwner)
+          .createProposal(
+            proposalTitle,
+            proposalDescription,
+            recipientAddress,
+            proposalAmount
+          );
+        result = await transaction.wait();
+        proposalId = result.events[0].args.id.toNumber();
+
+        transaction = await crowdfund
+          .connect(deployer)
+          .setKeeperRegistry(deployer.address);
+        result = await transaction.wait();
+
+        await network.provider.send("evm_increaseTime", [86400 * 2]); // Advance the block timestamp by 48 hours
+        await network.provider.send("evm_mine"); // Mine a new block with the updated timestamp
+
+        transaction = await crowdfund.connect(voter2).performUpkeep([]);
+        result = await transaction.wait();
+      });
+      it("should not release the payment if the quorum does not meet", async () => {
+        expect(await crowdfund.getDaoBalance()).to.equal(
+          ethers.utils.parseEther("2")
+        );
+      });
+
+      it("should not release the payment if the downvotes are more than upvotes", async () => {
+        transaction = await crowdfund
+          .connect(voter2)
+          .voteOnProposal(proposalId, false);
+        result = await transaction.wait();
+
+        expect(await crowdfund.getDaoBalance()).to.equal(
+          ethers.utils.parseEther("2")
+        );
+      });
     });
   });
 });

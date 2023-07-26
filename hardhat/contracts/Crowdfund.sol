@@ -182,6 +182,7 @@ contract Crowdfund is
                 _grantRole(i_CONTRIBUTOR_ROLE, msg.sender);
                 s_stakeholders[msg.sender] = totalContributions;
             }
+
             s_contributors[msg.sender] += msg.value;
         } else {
             s_contributors[msg.sender] += msg.value;
